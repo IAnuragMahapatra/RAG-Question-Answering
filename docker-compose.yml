@@ -1,0 +1,70 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - "C:/Users/Anurag/.ollama:/root/.ollama"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: "all"
+              capabilities: [gpu]
+    tty: true
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/chroma_db:/app/chroma_db
+      - ./backend/uploads:/app/uploads
+      # For development, uncomment to mount your backend code:
+      # - ./backend:/app
+    depends_on:
+      ollama:
+        condition: service_started
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      # Add any other environment variables your backend needs, e.g., from a .env file
+      # - DATABASE_URL=...
+      # - API_KEY=...
+    restart: unless-stopped
+    # healthcheck: # Optional: Add a health check
+    #   test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/health || exit 1"] # Adjust endpoint
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      # If NEXT_PUBLIC_API_BASE_URL needs to be set at build time for Next.js:
+      # args:
+      #   NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    # Command to serve the statically exported Next.js site from the 'out' directory
+    command: npx serve@latest -s out -l 3000
+    depends_on:
+      backend: # Ensure backend is at least started. Use service_healthy if backend has a healthcheck.
+        condition: service_started
+    environment:
+      # This NEXT_PUBLIC_API_BASE_URL is primarily for if your client-side code
+      # (JavaScript running in the browser) needs to know the API URL dynamically
+      # after the static build. However, for 'output: export', this URL is typically
+      # baked in during the build if referenced in getStaticProps/Paths or directly in components.
+      # The key is that the browser, when accessing http://localhost:3000,
+      # will make API calls to http://localhost:8000.
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 # This is for the browser's perspective
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+    driver: local
